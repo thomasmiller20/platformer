@@ -35,6 +35,9 @@ class Player(pygame.sprite.Sprite):
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
 
+        # State to handle grace period
+        self.grace_period = 0
+
     def move(self):
         self.acc = vec(0, 0.5)  # Gravity effect
 
@@ -56,11 +59,18 @@ class Player(pygame.sprite.Sprite):
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc  # Simplified physics equation
 
-        # Ensure the player stays within the screen bounds
-        if self.pos.x > WIDTH - self.rect.width:  # Right boundary
-            self.pos.x = WIDTH - self.rect.width
-        if self.pos.x < 0:  # Left boundary
-            self.pos.x = 0
+        # If in grace period, don't check for boundary collision or game over
+        if self.grace_period > 0:
+            self.grace_period -= 1  # Countdown to end grace period
+
+        # Check for left and right screen boundaries, teleport if at boundary
+        if self.pos.x >= WIDTH - self.rect.width:  # Right boundary
+            if self.grace_period <= 0:
+                self.teleport_to_random_room()
+
+        if self.pos.x <= 0:  # Left boundary
+            if self.grace_period <= 0:
+                self.teleport_to_random_room()
 
         # Ensure the player doesn't go below the platform
         if self.pos.y > HEIGHT - self.rect.height:  # Bottom boundary
@@ -70,6 +80,18 @@ class Player(pygame.sprite.Sprite):
         # Update the rect object for drawing the player
         self.rect.midbottom = self.pos
 
+    def teleport_to_random_room(self):
+        """Teleports the player to a random location and creates new platforms and enemies."""
+        new_x = random.randint(0, WIDTH - self.rect.width)  # Random horizontal position
+        self.pos.x = new_x  # Teleport the player to a random x-coordinate
+        self.pos.y = HEIGHT - self.rect.height  # Keep the y-coordinate at the bottom
+
+        # Reset the grace period
+        self.grace_period = 60  # Give the player 1 second of immunity
+
+        # Clear the previous platforms and enemies and generate new ones
+        generate_platforms_and_enemies()
+
 
 class Enemy(pygame.sprite.Sprite):
     def __init__(self):
@@ -78,7 +100,8 @@ class Enemy(pygame.sprite.Sprite):
         self.surf.fill((255, 255, 40))  # Yellow color for the enemy
         self.rect = self.surf.get_rect()
 
-        self.pos = vec(150, 385)  # Initial position of the enemy
+        # Random initial position for the enemy
+        self.pos = vec(random.randint(50, WIDTH - 50), random.randint(100, HEIGHT - 50))
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
 
@@ -122,9 +145,9 @@ class Enemy(pygame.sprite.Sprite):
 class Platform(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
-        self.surf = pygame.Surface((WIDTH, 20))
+        self.surf = pygame.Surface((random.randint(50, 150), 20))  # Random platform width
         self.surf.fill("red")  # Red color for the platform
-        self.rect = self.surf.get_rect(center=(WIDTH / 2, HEIGHT - 10))
+        self.rect = self.surf.get_rect(center=(x, y))
 
 
 # Create the platform, player, and enemy instances
@@ -138,6 +161,37 @@ all_sprites.add(PT1)
 all_sprites.add(P1)
 all_sprites.add(E1)
 
+# Function to generate random platforms and enemies
+def generate_platforms_and_enemies():
+    global all_sprites
+    # Remove previous platforms and enemies
+    for sprite in all_sprites:
+        if isinstance(sprite, Platform) or isinstance(sprite, Enemy):
+            sprite.kill()
+
+    # Random number of platforms (between 3 and 5)
+    num_platforms = random.randint(3, 5)
+    platform_positions = []
+    
+    # Generate random platforms with enough space for the player to land
+    for _ in range(num_platforms):
+        x = random.randint(50, WIDTH - 50)
+        y = random.randint(100, HEIGHT - 100)  # Avoid placing platforms too close to the edges
+        platform_positions.append((x, y))
+        new_platform = Platform(x, y)
+        all_sprites.add(new_platform)
+
+    # Random number of enemies (between 2 and 4)
+    num_enemies = random.randint(2, 4)
+    for _ in range(num_enemies):
+        # Ensure enemies are placed on or above the platforms
+        x = random.choice(platform_positions)[0]  # Position enemy on a platform
+        y = random.randint(100, HEIGHT - 50)  # Slightly above the platform
+        new_enemy = Enemy()
+        new_enemy.pos = vec(x, y)
+        all_sprites.add(new_enemy)
+
+
 # Game loop
 while True:
     for event in pygame.event.get():
@@ -145,15 +199,22 @@ while True:
             pygame.quit()
             sys.exit()
 
-    # Move the player and enemy
+    # Move the player
     P1.move()
-    E1.move()
 
-    # Check for collision between the player and the enemy
-    if pygame.sprite.collide_rect(P1, E1):
-        print("Game Over!")
-        pygame.quit()
-        sys.exit()
+    # Move all enemies
+    for enemy in all_sprites:
+        if isinstance(enemy, Enemy):
+            enemy.move()
+
+    # Check for collisions between player and enemies, only if outside grace period
+    if P1.grace_period <= 0:
+        for enemy in all_sprites:
+            if isinstance(enemy, Enemy):
+                if pygame.sprite.collide_rect(P1, enemy):
+                    print("Game Over!")
+                    pygame.quit()
+                    sys.exit()
 
     # Update the display
     displaysurface.fill((0, 0, 0))  # Clear the screen with black color
